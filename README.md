@@ -1,7 +1,7 @@
 # AgriTower
 
 <div align="center">
-  <h1>🌱 AgroPico RTOS</h1>
+  <h1>🌱 AgriTower</h1>
   <h3>Controlador Inteligente de Irrigação e Torres Hidropônicas de Nível Industrial</h3>
   
   <p>
@@ -31,7 +31,7 @@ O firmware foi desenvolvido utilizando uma arquitetura modular e orientada a obj
 | Task | Período / Gatilho | Descrição |
 | :--- | :--- | :--- |
 | **`TaskSensores`** | 2000 ms (Tick) | Lê sensores analógicos/digitais, aplica matemática de condicionamento de sinal (divisores de tensão), empacota em uma `struct` e envia para a Fila (Queue). |
-| **`TaskBomba`** | Contínua (Loop) | Controla a bomba de 12V via PWM. Aplica *fade-in* (soft-start) para proteção mecânica, mantém ligada por 2s e descansa por 5s. Sincroniza com o LED de status. |
+| **`TaskBomba`** | Contínua | Controla a bomba de 12V via PWM. Aplica *fade-in* (soft-start) para proteção mecânica, mantém ligada por 2s e descansa por 5s. Sincroniza com o LED de status. |
 | **`TaskComunicacao`** | Bloqueante | Fica em estado *Blocked* aguardando a Queue do FreeRTOS. Ao receber a `struct`, formata e transmite via `Serial1` para o ESP32. |
 
 ---

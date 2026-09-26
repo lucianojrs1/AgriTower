@@ -2,7 +2,7 @@
 
 <div align="center">
   <h1>🌱 AgriTower</h1>
-  <h3>Controlador Inteligente de Irrigação e Torres Hidropônicas de Nível Industrial</h3>
+  <h3>Controlador Inteligente de Irrigação e Torres Hidropônicas</h3>
   
   <p>
     <img src="https://img.shields.io/badge/C++-00599C?style=for-the-badge&logo=c%2B%2B&logoColor=white" alt="C++">
@@ -17,15 +17,15 @@
 
 ## 📖 Visão Geral
 
-O **AgriTower** é um sistema embarcado de alta confiabilidade projetado para o controle preciso de irrigação e torres hidropônicas. O cérebro do sistema é uma **Raspberry Pi Pico (RP2040)**, operando sob o kernel de tempo real **FreeRTOS** para garantir multitarefa determinística e não-bloqueante. 
+O **AgriTower** é um sistema embarcado de alta confiabilidade projetado para o controle preciso de irrigação e torres hidropônicas. O cérebro do sistema é uma **Raspberry Pi Pico**, operando sob o kernel de tempo real **FreeRTOS** para garantir multitarefa determinística e não-bloqueante. 
 
-O sistema é responsável pela leitura de sensores críticos, controle de atuadores com proteção mecânica (soft-start) e roteamento de dados via UART para um gateway IoT (ESP32), formando a base de uma solução agrícola moderna e conectada.
+O sistema é responsável pela leitura de sensores, controle de atuadores e roteamento de dados via UART para um gateway IoT (ESP32), formando a base de uma solução agrícola moderna e conectada.
 
 ---
 
 ## 🏗️ Arquitetura de Software
 
-O firmware foi desenvolvido utilizando uma arquitetura modular e orientada a objetos, separando claramente as responsabilidades de hardware e lógica de negócio. O uso do **FreeRTOS** garante que leituras de sensores, controle de atuadores e comunicação ocorram em paralelo sem interferências.
+O firmware foi desenvolvido utilizando uma arquitetura modular e orientada a objetos, separando claramente as responsabilidades de hardware e lógica. O uso do **FreeRTOS** garante que leituras de sensores, controle de atuadores e comunicação ocorram em paralelo sem interferências.
 
 ### ⚙️ Tasks do FreeRTOS
 | Task | Período / Gatilho | Descrição |

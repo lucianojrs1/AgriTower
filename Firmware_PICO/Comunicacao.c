@@ -14,8 +14,14 @@ void TaskComunicacao(void *pvParameters){
             Serial1.print("L:");
             Serial1.print(dadosRecebidos.luminosidade);
   
-            Serial1.print(",T:");
-            Serial1.print(dadosRecebidos.temperatura);
+            Serial1.print(",TAG:");
+            Serial1.print(dadosRecebidos.tempAgua);
+
+            Serial1.print(",TAR:");
+            Serial1.print(dadosRecebidos.tempAr);
+
+            Serial1.print(",U:");
+            Serial1.println(dadosRecebidos.umidade);
 
             Serial1.print(",B:");
             Serial1.println(dadosRecebidos.tensaoBateria);            

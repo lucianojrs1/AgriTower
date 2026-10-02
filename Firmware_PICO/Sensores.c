@@ -42,16 +42,23 @@ for(;;){
   Serial.print("Luz Solar: ");
   Serial.print(luminosidade);
   Serial.print("% | Temp da Água: ");
-  Serial.print(temperatura);
+  Serial.print(temp_agua);
   Serial.println(" °C");
-  Serial.print("Tensão da Bateria: ");
+  Serial1.print("% | Temp do Ar: ");
+  Serial1.print(temp_ar);
+  Serial.println(" °C");
+  Serial1.print("Umidade:");
+  Serial1.print(umidade);
+  Serial.print("% | Tensão da Bateria: ");
   Serial.print(tensaoBateria);
   Serial.println(" V");
   
   DadosSensores novosDados;
   novosDados.luminosidade = luminosidade;
-  novosDados.temperatura = temperatura;
+  novosDados.temAgua = temp_agua;
   novosDados.tensaoBateria = tensaoBateria;
+  novosDados.tempAr = temp_ar;
+  novosDados.umidade = umidade;  
   
   xQueueSend(filaDados, &novosDados, 0);
   vTaskDelay(pdMS_TO_TICKS(2000));

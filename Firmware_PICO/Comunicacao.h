@@ -7,7 +7,9 @@
 
 struct DadosSensores{
     int luminosidade;
-    float temperatura;
+    float tempAgua;
+    float tempAr;
+    int umidade;
     float tensaoBat;
 };
 

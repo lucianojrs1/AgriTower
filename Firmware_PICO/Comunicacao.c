@@ -1,7 +1,7 @@
 #include "Comunicacao.h"
 
 void initComunicacao(){
-    Serial1.begin(9600);
+    Serial1.begin(115200);
     filaDados = xQueueCreate(1, sizeof(DadosSensores));
 }
 

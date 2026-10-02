@@ -55,10 +55,10 @@ for(;;){
   
   DadosSensores novosDados;
   novosDados.luminosidade = luminosidade;
-  novosDados.temAgua = temp_agua;
-  novosDados.tensaoBateria = tensaoBateria;
+  novosDados.tempAgua = temp_agua;
   novosDados.tempAr = temp_ar;
-  novosDados.umidade = umidade;  
+  novosDados.umidade = umidade; 
+  novosDados.tensaoBateria = tensaoBateria;
   
   xQueueSend(filaDados, &novosDados, 0);
   vTaskDelay(pdMS_TO_TICKS(2000));

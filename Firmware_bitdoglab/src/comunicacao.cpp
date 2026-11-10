@@ -29,7 +29,7 @@ void vTaskComunicacao(void *pvParameters) {
 
     // Controle de periodicidade exata de 2000ms (2 segundos)
     TickType_t xLastWakeTime = xTaskGetTickCount();
-    const TickType_t xFrequencia = pdMS_TO_TICKS(2000);
+    const TickType_t xFrequencia = pdMS_TO_TICKS(500); //MUDEI PARA MEIO SEGUNDO A FREQ
 
     for (;;) {
         // Acende o LED Azul indicando início da transmissão de telemetria

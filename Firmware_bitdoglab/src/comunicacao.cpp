@@ -19,7 +19,7 @@ void initComunicacao() {
 }
 
 // =========================================================================
-// TASK RTOS: Envio de Telemetria (Serial2) e Painel USB (A cada 2000ms)
+// TASK RTOS: Envio de Telemetria (Serial2) e Painel USB (A cada 500ms)
 // =========================================================================
 void vTaskComunicacao(void *pvParameters) {
     (void) pvParameters;

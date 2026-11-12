@@ -220,6 +220,14 @@ const int PLANTIO_MES = 10;
 const int PLANTIO_DIA = 1;
 const int DIAS_CRESCIMENTO_MANUAL = -1; // coloque um valor >= 1 para forçar os dias (ex.: testar sem NTP)
 
+// A data de plantio pode ser definida pelo dashboard (atributo compartilhado "data_plantio").
+// As constantes acima são só o valor padrão, usado até o ThingsBoard mandar uma data.
+int plantioAno = PLANTIO_ANO;
+int plantioMes = PLANTIO_MES;
+int plantioDia = PLANTIO_DIA;
+bool plantioVeioDoDashboard = false;
+const int DIAS_SEM_RELOGIO = -9999; // resposta de calcularDiasCrescimento() quando o NTP não sincronizou
+
 const char* NOMES_STATUS_ALFACE[3] = {"Crescendo", "Pronto para colher", "Estragado"};
 const char* DICA_ALTA[NUM_SENSORES_REF]  = {"ventilar/sombrear a torre", "melhorar a ventilação (risco de fungos)",
                                             "diluir a solução com água", "baixar o pH da solução"};
@@ -238,22 +246,22 @@ struct DiagnosticoAlface
   String conclusao;
 };
 
-// Dias desde o plantio (dia do plantio = 1). Retorna -1 se o relógio ainda não sincronizou.
+// Dias desde o plantio (dia do plantio = 1). Retorna DIAS_SEM_RELOGIO se o relógio ainda não sincronizou.
 int calcularDiasCrescimento()
 {
   if (DIAS_CRESCIMENTO_MANUAL >= 1) return DIAS_CRESCIMENTO_MANUAL;
 
   time_t agora = time(nullptr);
-  if (agora < 1700000000) return -1; // NTP ainda não sincronizou
+  if (agora < 1700000000) return DIAS_SEM_RELOGIO; // NTP ainda não sincronizou
 
   struct tm hoje;
   localtime_r(&agora, &hoje);
   hoje.tm_hour = 12; hoje.tm_min = 0; hoje.tm_sec = 0; // compara só as datas
 
   struct tm plantio = {};
-  plantio.tm_year = PLANTIO_ANO - 1900;
-  plantio.tm_mon  = PLANTIO_MES - 1;
-  plantio.tm_mday = PLANTIO_DIA;
+  plantio.tm_year = plantioAno - 1900;
+  plantio.tm_mon  = plantioMes - 1;
+  plantio.tm_mday = plantioDia;
   plantio.tm_hour = 12;
   plantio.tm_isdst = -1;
 
@@ -261,14 +269,66 @@ int calcularDiasCrescimento()
   return (int)lround(segundos / 86400.0) + 1;
 }
 
+// Lê a data de plantio que veio do dashboard. Aceita:
+//  - texto "AAAA-MM-DD" ou "DD/MM/AAAA" (widget/atributo de texto)
+//  - número em milissegundos (widget de data do ThingsBoard)
+bool atualizarDataPlantio(JsonVariantConst valor)
+{
+  int ano = 0, mes = 0, dia = 0;
+  if (valor.is<const char*>())
+  {
+    const char* texto = valor.as<const char*>();
+    if (sscanf(texto, "%d-%d-%d", &ano, &mes, &dia) != 3 &&
+        sscanf(texto, "%d/%d/%d", &dia, &mes, &ano) != 3)
+    {
+      ano = 0; // formato desconhecido
+    }
+  }
+  else if (valor.is<double>())
+  {
+    time_t segundos = (time_t)(valor.as<double>() / 1000.0);
+    struct tm data;
+    localtime_r(&segundos, &data);
+    ano = data.tm_year + 1900;
+    mes = data.tm_mon + 1;
+    dia = data.tm_mday;
+  }
+
+  if (ano < 2020 || ano > 2100 || mes < 1 || mes > 12 || dia < 1 || dia > 31)
+  {
+    static unsigned long ultimoAviso = 0;
+    if (ultimoAviso == 0 || millis() - ultimoAviso >= 60000) // avisa no máximo 1x por minuto
+    {
+      ultimoAviso = millis();
+      Serial.println("[DASHBOARD] data_plantio inválida (use AAAA-MM-DD, DD/MM/AAAA ou o widget de data)");
+    }
+    return false;
+  }
+
+  if (!plantioVeioDoDashboard || ano != plantioAno || mes != plantioMes || dia != plantioDia)
+  {
+    Serial.printf("[DASHBOARD] Nova data de plantio: %02d/%02d/%04d\n", dia, mes, ano);
+  }
+  plantioAno = ano;
+  plantioMes = mes;
+  plantioDia = dia;
+  plantioVeioDoDashboard = true;
+  return true;
+}
+
 // Roda a árvore de decisão e compara a leitura com o dataset de referência
 DiagnosticoAlface analisarAlface(float temperatura, float umidade, float tds, float ph)
 {
   DiagnosticoAlface d;
   d.dias = calcularDiasCrescimento();
-  if (d.dias < 0)
+  if (d.dias == DIAS_SEM_RELOGIO)
   {
     d.conclusao = "Relógio sem NTP: não dá para calcular os dias de crescimento.";
+    return d;
+  }
+  if (d.dias < 1)
+  {
+    d.conclusao = "Data de plantio depois de hoje: confira o campo data_plantio no dashboard.";
     return d;
   }
   d.valido = true;
@@ -410,7 +470,7 @@ void sincronizarBomba()
     cliente.setInsecure();
     HTTPClient http;
 
-    http.begin(cliente, "https://tb.cin.ufpe.br/api/v1/torre_hidroponica_token/attributes?sharedKeys=bomba_ativa,forca_bomba");
+    http.begin(cliente, "https://tb.cin.ufpe.br/api/v1/torre_hidroponica_token/attributes?sharedKeys=bomba_ativa,forca_bomba,data_plantio");
     int resultado = http.GET();
 
     if (resultado == 200)
@@ -425,6 +485,13 @@ void sincronizarBomba()
         Serial.println(error.f_str());
         http.end();
         return;
+      }
+
+      // Data de plantio definida pelo dashboard (atributo compartilhado "data_plantio")
+      JsonVariantConst dataPlantio = doc["shared"]["data_plantio"].as<JsonVariantConst>();
+      if (!dataPlantio.isNull())
+      {
+        atualizarDataPlantio(dataPlantio);
       }
 
       bool ativa = doc["shared"]["bomba_ativa"];
@@ -631,6 +698,12 @@ void enviarTelemetria()
     pacote["alertas_alface"] = diag.numAlertas;
   }
   pacote["conclusao_alface"] = diag.conclusao;
+
+  // Data de plantio que a ESP está usando (para conferir no dashboard)
+  char plantio_str[16];
+  snprintf(plantio_str, sizeof(plantio_str), "%02d/%02d/%04d", plantioDia, plantioMes, plantioAno);
+  pacote["data_plantio_em_uso"] = plantio_str;
+  pacote["data_plantio_origem"] = plantioVeioDoDashboard ? "dashboard" : "código";
 
   String serial_temp;
   serializeJson(pacote, serial_temp);

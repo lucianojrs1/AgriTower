@@ -19,8 +19,7 @@ void initRelogio() {
     Serial2.setRX(pinRX_ESP);
     Serial2.begin(9600);
     
-    // IMPORTANTE PARA RTOS: Reduz o timeout de leitura de 1000ms para 50ms
-    // Evita que readStringUntil bloqueie a Task por 1s caso venha lixo na serial
+    // Reduz o timeout de leitura de 1000ms para 50ms
     Serial2.setTimeout(50);
 
     Serial.println("[INIT RELOGIO] Serial2 (GP8/GP9) iniciada a 9600 baud.");
@@ -47,13 +46,10 @@ Horario_t obterHorario() {
 void vTaskRelogio(void *pvParameters) {
     (void) pvParameters;
 
-    // Guarda o Tick do último avanço de minuto (equivale ao ultimoIncrementoMinuto)
     TickType_t xUltimoIncrementoMinuto = xTaskGetTickCount();
     const TickType_t xIntervaloUmMinuto = pdMS_TO_TICKS(60000); // 60.000 ms
 
     for (;;) {
-        TickType_t xTempoAtual = xTaskGetTickCount();
-
         // -----------------------------------------------------------------
         // PARTE 1: Verifica se o ESP32 enviou horário novo ("T:14:35\n")
         // -----------------------------------------------------------------
@@ -66,14 +62,15 @@ void vTaskRelogio(void *pvParameters) {
                 Serial.print(comando);
                 Serial.println("'");
 
-                if (comando.startsWith("T:")) {
-                    int posDoisPontos = comando.indexOf(':', 2);
+                // Procura por "T:" mesmo que venha algum caractere de lixo antes na linha
+                int posT = comando.indexOf("T:");
+                if (posT != -1) {
+                    int posDoisPontos = comando.indexOf(':', posT + 2);
                     if (posDoisPontos != -1) {
-                        int h = comando.substring(2, posDoisPontos).toInt();
+                        int h = comando.substring(posT + 2, posDoisPontos).toInt();
                         int m = comando.substring(posDoisPontos + 1).toInt();
 
                         if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
-                            // SEÇÃO CRÍTICA: Atualiza a hora protegida pelo Mutex
                             if (xMutexRelogio != NULL && xSemaphoreTake(xMutexRelogio, pdMS_TO_TICKS(100)) == pdTRUE) {
                                 horarioAtual.hora = h;
                                 horarioAtual.minuto = m;
@@ -81,7 +78,7 @@ void vTaskRelogio(void *pvParameters) {
                                 xSemaphoreGive(xMutexRelogio);
                             }
 
-                            // Reseta o contador de 60s local usando os Ticks atuais
+                            // Reinicia a referencia de tempo APOS terminar a leitura da Serial2
                             xUltimoIncrementoMinuto = xTaskGetTickCount();
 
                             Serial.print("[RELOGIO] Horario sincronizado com sucesso -> ");
@@ -101,12 +98,15 @@ void vTaskRelogio(void *pvParameters) {
         // -----------------------------------------------------------------
         // PARTE 2: Fallback local (avança 1 min se passar 60s sem o ESP32)
         // -----------------------------------------------------------------
+        // Captura xTempoAtual AQUI (depois da Serial2) para que xTempoAtual nunca
+        // seja menor que xUltimoIncrementoMinuto (evita underflow de uint32_t!)
+        TickType_t xTempoAtual = xTaskGetTickCount();
+
         if ((xTempoAtual - xUltimoIncrementoMinuto) >= xIntervaloUmMinuto) {
-            xUltimoIncrementoMinuto += xIntervaloUmMinuto;
+            xUltimoIncrementoMinuto = xTempoAtual; // Ancora no tempo real atual
 
             int hPrint = 0, mPrint = 0;
 
-            // SEÇÃO CRÍTICA: Incrementa o minuto protegendo com Mutex
             if (xMutexRelogio != NULL && xSemaphoreTake(xMutexRelogio, pdMS_TO_TICKS(100)) == pdTRUE) {
                 horarioAtual.minuto++;
                 if (horarioAtual.minuto >= 60) {
@@ -126,8 +126,6 @@ void vTaskRelogio(void *pvParameters) {
             Serial.println(mPrint);
         }
 
-        // Dorme por 100ms (10 checagens por segundo na Serial2 é mais que suficiente
-        // e deixa 99.9% do tempo de CPU livre para o resto do sistema)
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 }

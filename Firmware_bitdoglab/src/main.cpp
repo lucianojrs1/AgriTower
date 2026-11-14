@@ -27,6 +27,7 @@ void setup() {
     initSensores();    // Inicializa I2C0, ADS1115, DS18B20, DHT22 e Mutex
     initComunicacao();
     initOled(); // Inicializa LED Azul de telemetria (GP12)
+ 
 
     // 2. Criação das Tasks (Rate Monotonic: menor período = maior prioridade)
     // Stacks de 1024 a 2048 words garantem folga total para Serial.print e floats no RP2040

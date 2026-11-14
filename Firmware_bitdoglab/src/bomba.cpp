@@ -3,15 +3,12 @@
 #include "agendamento.h"
 
 // --- Mapeamento de Pinos de Atuação ---
-static const int pinBomba = 4;  // Bomba 12V via TIP120 (IDC 8)
-static const int pinLedG  = 11; // LED Verde da BitDogLab (Bomba em 100%)
-
-// --- Parâmetros da Rampa PWM ---
-static const int passoFade = 5; // 255 / 5 = 51 passos de 15ms (~765ms de rampa)
+static const int pinBomba  = 4;  // Bomba 12V via Relé (Active LOW: LOW = Liga, HIGH = Desliga)
+static const int pinLedG   = 11; // LED Verde da BitDogLab (Bomba Ligada)
+static const int pinBuzzer = 10; // Buzzer B da BitDogLab (Aviso sonoro de partida)
 
 // --- Variáveis Internas Protegidas por Mutex ---
 static EstadoBomba estadoAtualBomba = DESLIGADA;
-static int pwmAtual = 0;
 static SemaphoreHandle_t xMutexBomba = NULL;
 
 // =========================================================================
@@ -19,10 +16,10 @@ static SemaphoreHandle_t xMutexBomba = NULL;
 // =========================================================================
 const char* nomeEstadoBomba(EstadoBomba est) {
     switch (est) {
-        case DESLIGADA:  return "DESLIGADA (0%)";
-        case LIGANDO:    return "SUBINDO PWM...";
-        case LIGADA:     return "LIGADA (100%)";
-        case DESLIGANDO: return "DESCENDO PWM...";
+        case DESLIGADA:  return "DESLIGADA (OFF)";
+        case LIGANDO:    return "ACIONANDO RELE...";
+        case LIGADA:     return "LIGADA (ON)";
+        case DESLIGANDO: return "DESLIGANDO RELE...";
         default:         return "DESCONHECIDO";
     }
 }
@@ -35,23 +32,25 @@ void initBomba() {
 
     pinMode(pinBomba, OUTPUT);
     pinMode(pinLedG, OUTPUT);
+    pinMode(pinBuzzer, OUTPUT);
 
-    analogWrite(pinBomba, 0);
+    // IMPORTANTE: Relé é Active LOW, portanto inicia em HIGH para começar DESLIGADO!
+    digitalWrite(pinBomba, HIGH);
     digitalWrite(pinLedG, LOW);
+    digitalWrite(pinBuzzer, LOW);
 
-    Serial.println("[INIT BOMBA] Pino PWM (GP4) e LED Verde (GP11) configurados.");
+    Serial.println("[INIT BOMBA] Rele (GP4 em HIGH/OFF), LED Verde (GP11) e Buzzer (GP10) configurados.");
 }
 
 // =========================================================================
-// Função Thread-Safe para a Telemetria consultar o PWM e o Estado
+// Função Thread-Safe para a Telemetria e OLED consultarem o Estado
 // =========================================================================
 StatusBomba_t obterStatusBomba() {
-    StatusBomba_t copiaSegura = {DESLIGADA, 0};
+    StatusBomba_t copiaSegura = {DESLIGADA}; // Inicializa apenas o campo 'estado'
 
     if (xMutexBomba != NULL) {
         if (xSemaphoreTake(xMutexBomba, pdMS_TO_TICKS(20)) == pdTRUE) {
-            copiaSegura.estado   = estadoAtualBomba;
-            copiaSegura.pwmAtual = pwmAtual;
+            copiaSegura.estado = estadoAtualBomba;
             xSemaphoreGive(xMutexBomba);
         }
     }
@@ -59,89 +58,79 @@ StatusBomba_t obterStatusBomba() {
 }
 
 // =========================================================================
-// TASK RTOS: Controle de Transição e Rampa PWM Suave (A cada 15ms exatos)
+// TASK RTOS: Controle de Acionamento ON/OFF do Relé
 // =========================================================================
 void vTaskBomba(void *pvParameters) {
     (void) pvParameters;
 
-    // Variáveis para garantir periodicidade estrita de 15ms sem jitter
     TickType_t xLastWakeTime = xTaskGetTickCount();
-    const TickType_t xIntervaloFade = pdMS_TO_TICKS(15);
+    const TickType_t xIntervalo = pdMS_TO_TICKS(50); // 50ms: resposta rápida ao botão sem gastar CPU
+
+    EstadoBomba estadoLocal = DESLIGADA;
 
     for (;;) {
         // -----------------------------------------------------------------
         // 1. LÓGICA DE TRANSIÇÃO DE ESTADOS (Obedece ao Modo Auto ou Manual)
         // -----------------------------------------------------------------
         if (isModoAutomatico()) {
-            // Em Modo Automático, segue a decisão do Agendador Horário
             StatusAgendamento_t agenda = obterStatusAgendamento();
 
             if (agenda.deveEstarLigada) {
-                if (estadoAtualBomba == DESLIGADA || estadoAtualBomba == DESLIGANDO) {
-                    estadoAtualBomba = LIGANDO;
+                if (estadoLocal == DESLIGADA || estadoLocal == DESLIGANDO) {
+                    estadoLocal = LIGANDO;
                 }
             } else {
-                if (estadoAtualBomba == LIGADA || estadoAtualBomba == LIGANDO) {
-                    estadoAtualBomba = DESLIGANDO;
+                if (estadoLocal == LIGADA || estadoLocal == LIGANDO) {
+                    estadoLocal = DESLIGANDO;
                 }
             }
         } else {
             // Em Modo Manual, verifica se o Botão A solicitou inversão
             if (consumirPedidoInversaoManual()) {
-                if (estadoAtualBomba == DESLIGADA || estadoAtualBomba == DESLIGANDO) {
-                    estadoAtualBomba = LIGANDO;
-                    Serial.println("[BOMBA] Override Manual -> Iniciando subida da rampa PWM!");
+                if (estadoLocal == DESLIGADA || estadoLocal == DESLIGANDO) {
+                    estadoLocal = LIGANDO;
+                    Serial.println("[BOMBA] Override Manual -> Ligando Bomba via Rele!");
                 } else {
-                    estadoAtualBomba = DESLIGANDO;
-                    Serial.println("[BOMBA] Override Manual -> Iniciando descida da rampa PWM!");
+                    estadoLocal = DESLIGANDO;
+                    Serial.println("[BOMBA] Override Manual -> Desligando Bomba via Rele!");
                 }
             }
         }
 
         // -----------------------------------------------------------------
-        // 2. EXECUÇÃO FÍSICA DA RAMPA PWM SUAVE (Passo de +/- 5 a cada 15ms)
+        // 2. EXECUÇÃO FÍSICA NO RELÉ (Active LOW), LED VERDE E BUZZER
         // -----------------------------------------------------------------
-        switch (estadoAtualBomba) {
+        switch (estadoLocal) {
             case LIGANDO:
-                pwmAtual += passoFade;
-                if (pwmAtual >= 255) {
-                    pwmAtual = 255;
-                    estadoAtualBomba = LIGADA;
-                    digitalWrite(pinLedG, HIGH);
-                    Serial.println(">>> [PWM BOMBA] Rampa concluida: Bomba em 100% (PWM = 255).");
-                }
-                analogWrite(pinBomba, pwmAtual);
+                digitalWrite(pinBomba, LOW);     // LOW atraca o módulo relé
+                digitalWrite(pinLedG, HIGH);     // Acende LED Verde da BitDogLab
+                tone(pinBuzzer, 2500, 150);      // Bipe de 150ms no GP10 (não-bloqueante)
+                estadoLocal = LIGADA;
+                Serial.println("[BOMBA] Rele Acionado (ON)");
                 break;
 
             case DESLIGANDO:
-                pwmAtual -= passoFade;
-                if (pwmAtual <= 0) {
-                    pwmAtual = 0;
-                    estadoAtualBomba = DESLIGADA;
-                    digitalWrite(pinLedG, LOW);
-                    Serial.println(">>> [PWM BOMBA] Rampa concluida: Bomba totalmente DESLIGADA (PWM = 0).");
-                }
-                analogWrite(pinBomba, pwmAtual);
+                digitalWrite(pinBomba, HIGH);    // HIGH solta o módulo relé
+                digitalWrite(pinLedG, LOW);      // Apaga LED Verde
+                estadoLocal = DESLIGADA;
+                Serial.println("[BOMBA] Rele Desligado (OFF)");
                 break;
 
             case LIGADA:
             case DESLIGADA:
-                // Mantém o estado estável sem gastar escrita desnecessária no hardware
                 break;
         }
 
         // -----------------------------------------------------------------
-        // 3. ATUALIZA DADOS COMPARTILHADOS COM A TELEMETRIA (Mutex rápido)
+        // 3. ATUALIZA VARIÁVEL GLOBAL PROTEGIDA POR MUTEX
         // -----------------------------------------------------------------
-        // Como só vTaskBomba escreve em pwmAtual e estadoAtualBomba, protegemos
-        // o acesso para garantir leitura atômica pela Task de Telemetria.
         if (xMutexBomba != NULL) {
-            if (xSemaphoreTake(xMutexBomba, 0) == pdTRUE) { // Timeout 0 para nunca atrasar a rampa!
+            if (xSemaphoreTake(xMutexBomba, 0) == pdTRUE) {
+                estadoAtualBomba = estadoLocal;
                 xSemaphoreGive(xMutexBomba);
             }
         }
 
-        // Dorme até fechar exatamente 15ms desde o início deste ciclo
-        vTaskDelayUntil(&xLastWakeTime, xIntervaloFade);
+        vTaskDelayUntil(&xLastWakeTime, xIntervalo);
     }
 }

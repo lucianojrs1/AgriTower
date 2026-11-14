@@ -27,9 +27,9 @@ void vTaskComunicacao(void *pvParameters) {
     // Aguarda 1000ms iniciais para a vTaskSensores concluir a 1ª leitura do DS18B20/DHT22
     vTaskDelay(pdMS_TO_TICKS(1000));
 
-    // Controle de periodicidade exata de 2000ms (2 segundos)
+    // Controle de periodicidade exata de 500ms (0,5 segundo)
     TickType_t xLastWakeTime = xTaskGetTickCount();
-    const TickType_t xFrequencia = pdMS_TO_TICKS(500); //MUDEI PARA MEIO SEGUNDO A FREQ
+    const TickType_t xFrequencia = pdMS_TO_TICKS(2000);
 
     for (;;) {
         // Acende o LED Azul indicando início da transmissão de telemetria
@@ -54,8 +54,10 @@ void vTaskComunicacao(void *pvParameters) {
         Serial2.print(",U:");  Serial2.print(sens.umidade, 0);
         Serial2.print(",P:");  Serial2.print(sens.valorPH, 2);
         Serial2.print(",S:");  Serial2.print(sens.valorTDS, 0);
-        Serial2.print(",M:");  Serial2.print(bomba.pwmAtual);
         Serial2.print(",A:");  Serial2.print(autoOn ? 1 : 0);
+        Serial2.print(",E:");  Serial2.print((bomba.estado == LIGADA || bomba.estado == LIGANDO) ? 1 : 0);
+        Serial2.print(",C:");  Serial2.print(agenda.minutoNoCiclo);
+        Serial2.print("/");    Serial2.print(agenda.tamanhoCiclo);
         Serial2.print(",T:");
         if (relog.hora < 10) Serial2.print("0");
         Serial2.print(relog.hora);
@@ -82,10 +84,7 @@ void vTaskComunicacao(void *pvParameters) {
         Serial.println(agenda.tamanhoCiclo);
 
         Serial.print("[BOMBA]  Estado: ");
-        Serial.print(nomeEstadoBomba(bomba.estado));
-        Serial.print(" | PWM Atual: ");
-        Serial.print(bomba.pwmAtual);
-        Serial.println("/255");
+        Serial.println(nomeEstadoBomba(bomba.estado)); // <-- println adicionado aqui!
 
         Serial.print("[SENSORES] Bat: "); Serial.print(sens.tensaoBateria, 1);
         Serial.print("V | Luz: ");        Serial.print(sens.luminosidade);
@@ -100,7 +99,7 @@ void vTaskComunicacao(void *pvParameters) {
         vTaskDelay(pdMS_TO_TICKS(50));
         digitalWrite(pinLedB, LOW);
 
-        // Dorme até completar o período exato de 2000ms
+        // Dorme até completar o período exato de 500ms
         vTaskDelayUntil(&xLastWakeTime, xFrequencia);
     }
 }

@@ -6,7 +6,7 @@
 #include <task.h>
 #include <semphr.h>
 
-// Máquina de Estados da Rampa PWM
+// Máquina de Estados da Bomba (Acionamento via Relé ON/OFF)
 enum EstadoBomba {
     DESLIGADA,
     LIGANDO,
@@ -14,19 +14,18 @@ enum EstadoBomba {
     DESLIGANDO
 };
 
-// Estrutura para a Telemetria consultar o estado atual com segurança
+// Estrutura para a Telemetria e o OLED consultarem o estado atual com segurança
 typedef struct {
     EstadoBomba estado;
-    int pwmAtual;
 } StatusBomba_t;
 
-// Inicializa os pinos da Bomba (GP4) e LED Verde (GP11) e cria o Mutex
+// Inicializa os pinos da Bomba (GP4), LED Verde (GP11), Buzzer (GP10) e cria o Mutex
 void initBomba();
 
 // Protótipo da Task do FreeRTOS (chamar no xTaskCreate do main.cpp)
 void vTaskBomba(void *pvParameters);
 
-// Função Thread-Safe para a Telemetria ler o PWM e o Estado da Bomba
+// Função Thread-Safe para a Telemetria e OLED lerem o Estado da Bomba
 StatusBomba_t obterStatusBomba();
 
 // Função auxiliar para retornar o nome do estado da bomba no Monitor Série

@@ -2,14 +2,15 @@
 
 <div align="center">
   <h1>🌱 AgriTower</h1>
-  <h3>Controlador Inteligente de Irrigação e Torres Hidropônicas</h3>
+  <h3>Controlador Inteligente de Irrigação e Torres Hidropônicas com Edge AI</h3>
   
   <p>
     <img src="https://img.shields.io/badge/C++-00599C?style=for-the-badge&logo=c%2B%2B&logoColor=white" alt="C++">
     <img src="https://img.shields.io/badge/Raspberry%20Pi%20Pico-A229B5?style=for-the-badge&logo=raspberrypi&logoColor=white" alt="Raspberry Pi Pico">
+    <img src="https://img.shields.io/badge/ESP32-E7352C?style=for-the-badge&logo=espressif&logoColor=white" alt="ESP32">
     <img src="https://img.shields.io/badge/FreeRTOS-0078C0?style=for-the-badge&logo=amazonaws&logoColor=white" alt="FreeRTOS">
     <img src="https://img.shields.io/badge/PlatformIO-FF7E00?style=for-the-badge&logo=platformio&logoColor=white" alt="PlatformIO">
-    <img src="https://img.shields.io/badge/Arduino-00878F?style=for-the-badge&logo=arduino&logoColor=white" alt="Arduino">
+    <img src="https://img.shields.io/badge/ThingsBoard-305680?style=for-the-badge&logo=thingsboard&logoColor=white" alt="ThingsBoard">
   </p>
 </div>
 
@@ -17,86 +18,168 @@
 
 ## 📖 Visão Geral
 
-O **AgriTower** é um sistema embarcado de alta confiabilidade projetado para o controle preciso de irrigação e torres hidropônicas. O cérebro do sistema é uma **Raspberry Pi Pico**, operando sob o kernel de tempo real **FreeRTOS** para garantir multitarefa determinística e não-bloqueante. 
+O **AgriTower** é um sistema embarcado de alta confiabilidade projetado para o monitoramento físico-químico, diagnóstico agronômico por Inteligência Artificial embarcada (*Edge AI*) e controle automatizado de irrigação em torres hidropônicas.
 
-O sistema é responsável pela leitura de sensores, controle de atuadores e roteamento de dados via UART para um gateway IoT (ESP32), formando a base de uma solução agrícola moderna e conectada.
+A arquitetura é dividida em dois subsistemas cooperativos:
+
+1. **Unidade de Controle e Aquisição (BitDogLab V7 / Raspberry Pi Pico - RP2040):** Opera sob o kernel de tempo real **FreeRTOS** (Core *Earle Philhower*), garantindo execução multitarefa determinística, leitura de sensores analógicos de $16\text{ bits}$ e digitais, interface gráfica local em display OLED, agendamento fotoperiódico (Dia/Noite) e acionamento seguro de bomba submersível *brushless*.
+
+2. **Gateway IoT e Inferência ML (ESP32):** Sincroniza o horário oficial via **NTP**, alimenta o relógio da BitDogLab via UART, executa localmente um modelo de **Árvore de Decisão (`DecisionTreeClassifier`)** aliado a análise estatística (*Z-score* e percentis) sobre os parâmetros da solução nutritiva e publica diagnósticos e telemetria via HTTPS no **ThingsBoard**.
 
 ---
 
 ## 🏗️ Arquitetura de Software
 
-O firmware foi desenvolvido utilizando uma arquitetura modular e orientada a objetos, separando claramente as responsabilidades de hardware e lógica. O uso do **FreeRTOS** garante que leituras de sensores, controle de atuadores e comunicação ocorram em paralelo sem interferências.
+### 📊 Diagrama de Fluxo do Sistema
 
-### ⚙️ Tasks do FreeRTOS
-| Task | Período / Gatilho | Descrição |
-| :--- | :--- | :--- |
-| **`TaskSensores`** | 2000 ms (Tick) | Lê sensores analógicos/digitais, aplica matemática de condicionamento de sinal (divisores de tensão), empacota em uma `struct` e envia para a Fila (Queue). |
-| **`TaskBomba`** | Contínua | Controla a bomba de 12V via PWM. Aplica *fade-in* (soft-start) para proteção mecânica, mantém ligada por 2s e descansa por 5s. Sincroniza com o LED de status. |
-| **`TaskComunicacao`** | Bloqueante | Fica em estado *Blocked* aguardando a Queue do FreeRTOS. Ao receber a `struct`, formata e transmite via `Serial1` para o ESP32. |
+O diagrama abaixo ilustra o fluxo de execução concorrente das *Tasks* do FreeRTOS na BitDogLab, a troca de pacotes via `Serial2` e o pipeline de inferência da Árvore de Decisão e publicação HTTPS na ESP32:
+
+<div align="center">
+  <img src="docs/Fluxo.png" alt="Diagrama de Fluxo do Sistema AgriTower" width="850">
+  <p><em>Figura 1: Diagrama de fluxo de software, escalonamento de Tasks RTOS e comunicação IoT.</em></p>
+</div>
+
+### 1. Firmware da BitDogLab (RP2040 + FreeRTOS)
+
+O firmware do controlador principal foi projetado de forma modularizada, encapsulando variáveis de estado com proteção atômica via **Mutexes (`SemaphoreHandle_t`)** para comunicação *thread-safe* entre as tarefas.
+
+#### ⚙️ Tasks do FreeRTOS
+
+| Task | Período / Gatilho | Descrição | 
+| :--- | :--- | :--- | 
+| **`vTaskSensores`** | $2000\text{ ms}$ | Lê sensores digitais (`DS18B20` e `DHT22`) e o conversor A/D externo de $16\text{ bits}$ (`ADS1115` via `Wire` / I2C0) para tensão da fonte/bateria, luminosidade (`LDR`), `pH` e condutividade/sólidos dissolvidos (`TDS`), atualizando a `struct` protegida por Mutex. | 
+| **`vTaskRelogio`** | $100\text{ ms}$ (Polling) | Escuta pacotes de sincronismo horário (`T:HH:MM`) enviados pelo ESP32 na `Serial2` e mantém um *fallback* interno de $60\text{ s}$ imune a *underflow* de `TickType_t` caso o gateway fique offline. | 
+| **`vTaskAgendamento`** | $500\text{ ms}$ | Avalia o horário atual e define a janela de irrigação conforme o fotoperíodo: **Ciclo Diurno** ($06\text{h}00$ às $17\text{h}59$: $5\text{ min}$ ligada / $10\text{ min}$ em pausa) e **Ciclo Noturno** ($18\text{h}00$ às $05\text{h}59$: $5\text{ min}$ ligada / $45\text{ min}$ em pausa). | 
+| **`vTaskBotoes`** | $20\text{ ms}$ (Debounce) | Monitora os botões físicos da placa para alternância imediata entre **Modo Automático** e **Modo Manual** (*override* direto da bomba). | 
+| **`vTaskBomba`** | $50\text{ ms}$ | Máquina de estados que comanda a bomba *brushless* de $12\text{ V}$ em modo `ON/OFF` via módulo relé (`Active LOW`), aciona o LED Verde de status e emite alerta sonoro não-bloqueante no Buzzer passivo. | 
+| **`vTaskOled`** | $500\text{ ms}$ | Renderiza no display OLED `SSD1306` ($128 \times 64$ no barramento dedicado `Wire1` / I2C1) o horário, modo de operação, progresso do ciclo, estado da bomba e todas as grandezas dos sensores. | 
+| **`vTaskComunicacao`** | $500\text{ ms}$ | Coleta de forma *thread-safe* os estados de todos os módulos, transmite a string compacta via `Serial2` para o ESP32, imprime o painel de diagnóstico na USB Serial e pulsa o LED Azul de telemetria. | 
+
+### 2. Gateway IoT e Edge AI (ESP32)
+
+O firmware da ESP32 atua como coprocessador de conectividade e inteligência artificial:
+
+* **Árvore de Decisão Embarcada (`Eloquent::ML`):** Modelo treinado a partir do *Lettuce Dataset* ($3.169$ registros), recebendo o vetor de atributos $x = [\text{Temperatura do Ar}, \text{Umidade}, \text{TDS}, \text{pH}, \text{Dias de Crescimento}]$ para classificar a planta em:
+  * `0`: **Crescendo**
+  * `1`: **Pronto para colher**
+  * `2`: **Estragado** (com alerta imediato de inspeção da torre)
+* **Diagnóstico Estatístico Contextual:** Compara cada leitura com a média ($\mu$) e o desvio padrão ($\sigma$) esperados para a idade exata do cultivo (dias $1$ a $48$), gerando recomendações agronômicas automáticas quando $\vert Z\vert > 2$ ou fora dos percentis $P_5\text{--}P_{95}$.
+* **Sincronização Dinâmica com o Dashboard:** Consulta atributos compartilhados no ThingsBoard (`data_plantio`) para recalcular automaticamente a idade da cultura e mantém o RP2040 sincronizado via NTP ($\text{GMT}-3$).
 
 ---
 
 ## 🔌 Hardware e Pinout
 
-O projeto conta com um circuito de condicionamento de sinal e proteção robusto, projetado para ambientes industriais úmidos e com variações de tensão.
+### ⚡ Diagrama Eletrônico (Esquemático)
 
-| Componente | Pino RP2040 | Tipo | Detalhes do Circuito / Hardware |
-| :--- | :---: | :---: | :--- |
-| **Bomba 12V** | `GP4` | PWM Out | Acionada via transistor **TIP120**. Diodo Schottky **1N5822** em paralelo (flyback) para proteção contra corrente de retorno. |
-| **Temp. (DS18B20)** | `GP22` | 1-Wire | Resistor pull-up de **4.7kΩ** ligado ao 3.3V. |
-| **Luz (LDR)** | `GP26` | ADC0 | Divisor de tensão com resistor de **10kΩ** ligado ao 3.3V. |
-| **Bateria (3S/12V)** | `GP27` | ADC1 | Divisor de tensão (**R1=47kΩ, R2=10kΩ**) para adequar os ~12.6V da bateria ao range de 3.3V do ADC. |
-| **UART (TX)** | `GP0` | Serial | Conectado ao **RX** do ESP32 (Lógica 3.3V). |
-| **UART (RX)** | `GP1` | Serial | Conectado ao **TX** do ESP32 (Lógica 3.3V). |
+Abaixo encontra-se o esquemático completo de interligação entre a **BitDogLab (RP2040)**, o **Gateway ESP32**, o conversor **ADS1115**, os condicionadores de sensores (`pH`, `TDS`, `LDR`, `DS18B20`, `DHT22`) e o estágio de potência com **Módulo Relé** para a bomba *brushless* de $12\text{ V}$:
 
-### 🔋 Sistema de Alimentação
-* **Fonte Primária:** Bateria Li-ion 3S (~12.6V).
-* **Regulação:** Módulo Step-Down **LM2596** ajustado para **5.0V**.
-* **Entrada na Pico:** Alimentação injetada diretamente no pino **VSYS** (bypassando o regulador interno, garantindo maior eficiência).
-* ⚠️ **Atenção:** Todos os GNDs (Bateria, LM2596, RP2040, ESP32 e Sensores) devem ser rigorosamente interligados.
+<div align="center">
+  <img src="docs/Esquematico.png" alt="Diagrama Eletrônico do Sistema AgriTower" width="850">
+  <p><em>Figura 2: Esquemático elétrico da PCB, condicionamento de sinais e acionamento de potência.</em></p>
+</div>
+
+### Mapeamento da BitDogLab (RP2040) e Periféricos Externos
+
+| Componente / Função | Pino RP2040 / Canal | Barramento / Tipo | Detalhes do Circuito / Hardware | 
+| :--- | :---: | :---: | :--- | 
+| **Bomba Brushless 12V** | `GP4` | Digital Out | Bomba submersível ($4.8\text{ W}$, $240\text{ L/h}$) chaveada via Módulo Relé `SRD-05VDC-SL-C` (*Active LOW*, $V_{CC} = 3.3\text{ V}$) com diodo *flyback* e capacitor de $100\text{ nF}$ nos bornes. | 
+| **Botão A (Override)** | `GP5` | Digital In | `INPUT_PULLUP` interno — inverte manualmente o estado da bomba no Modo Manual. | 
+| **Botão B (Modo)** | `GP6` | Digital In | `INPUT_PULLUP` interno — alterna entre **Modo Automático** e **Modo Manual**. | 
+| **UART1 TX (Pico** $\rightarrow$ **ESP32)** | `GP8` | `Serial2` TX | Conectado ao pino `RX2` (`GPIO16`) do ESP32 ($9600\text{ baud}$, lógica $3.3\text{ V}$). | 
+| **UART1 RX (ESP32** $\rightarrow$ **Pico)** | `GP9` | `Serial2` RX | Conectado ao pino `TX2` (`GPIO17`) do ESP32 ($9600\text{ baud}$, lógica $3.3\text{ V}$). | 
+| **Buzzer B (Alerta)** | `GP10` | PWM (Slice 5) | Buzzer eletromagnético passivo — emite bipe de $2.5\text{ kHz}$ ($150\text{ ms}$) na partida da bomba. | 
+| **LED Verde (Bomba)** | `GP11` | Digital Out | Indica bomba energizada / relé atracado (`ON`). | 
+| **LED Azul (Telemetria)** | `GP12` | Digital Out | Pulsa por $50\text{ ms}$ a cada pacote transmitido para o ESP32. | 
+| **Display OLED SSD1306** | `GP14` / `GP15` | `Wire1` (I2C1) | `SDA1` no `GP14`, `SCL1` no `GP15` a $400\text{ kHz}$ (endereço `0x3C`), isolado do barramento dos sensores. | 
+| **Conversor ADC ADS1115** | `GP0` / `GP1` | `Wire` (I2C0) | ADC de $16\text{ bits}$ para leitura imune a ruído de `A0` (Tensão $12\text{ V}$), `A1` (`LDR`), `A2` (`pH`) e `A3` (`TDS`). | 
+| **Temp. Água (DS18B20)** | Digital | 1-Wire | Sonda impermeável com resistor *pull-up* de $4.7\text{ k}\Omega$ ($2.2\text{ k}\Omega$ para cabos longos) ao $3.3\text{ V}$. | 
+| **Clima (DHT22)** | Digital | 1-Wire Prop. | Sensor de temperatura ($^\circ\text{C}$) e umidade relativa do ar ($\%$). | 
+
+### 🔋 Alimentação e Cabeamento Externo
+
+* **Fonte Primária:** Fonte Chaveada Colmeia ajustada em $12.2\text{ V}$ para a linha de potência da bomba submersível.
+* **Regulação Lógica:** Conversor Step-Down DC-DC entregando alimentação estabilizada para a placa e módulos sensores.
+* **Cabeamento para Ambiente Externo:** Uso de **Cabo Manga Blindado** (ou CAT5e F/UTP de dupla capa com proteção UV) para os sinais dos sensores (com malha aterrada exclusivamente no `GND` da PCB) e **Cabo Paralelo** $2 \times 1.5\text{ mm}^2$ separado fisicamente para a alimentação da bomba $12\text{ V}$.
 
 ---
 
 ## 📂 Estrutura do Projeto
 
-O código segue o padrão do PlatformIO, separando cabeçalhos e implementações:
+O repositório está organizado no padrão do **PlatformIO**, separando os módulos de domínio da BitDogLab, o firmware do gateway ESP32 e a documentação visual na pasta `docs/`:
 
-text
+```
 AgriTower/
-│   ├── Bomba.h       
-│   ├── Comunicacao.h 
-│   └── Sensores.h     
-│   ├── main.cp          # Setup do FreeRTOS e criação das Tasks
-│   ├── Bomba.cp         # Setup de Inicialização da Task reponsável pela Bomba
-│   ├── Comunicacao.cp   # Setup de Inicialização da Task reponsável pela Comunicação Serial 
-│   └── Sensores.cp      # Setup de Inicialização da Task reponsável pelos Sensores 
+├── docs/
+│   ├── diagrama_fluxo.png      # Fluxograma das Tasks RTOS e pipeline IoT/ML
+│   └── diagrama_eletronico.png # Esquemático elétrico completo da placa e sensores
+│
+├── Firmware_bitdoglab/
+│   ├── platformio.ini          # Configuração do RP2040 (Core Earle Philhower + FreeRTOS)
+│   └── src/
+│       ├── main.cpp            # Inicialização de periféricos e criação das Tasks do FreeRTOS
+│       ├── agendamento.h/.cpp  # Lógica de ciclos Diurno (5m/10m) e Noturno (5m/45m)
+│       ├── bomba.h/.cpp        # Máquina de estados do Relé (GP4), LED Verde (GP11) e Buzzer (GP10)
+│       ├── botao.h/.cpp        # Leitura com debounce dos botões de Modo (Auto/Manual) e Override
+│       ├── comunicacao.h/.cpp  # Transmissão Serial2 para o ESP32 e painel de debug USB
+│       ├── oled.h/.cpp         # Interface gráfica local no display SSD1306 via Wire1 (GP14/GP15)
+│       ├── relogio.h/.cpp      # Recepção de hora NTP via Serial2 e fallback interno de 60s
+│       └── sensores.h/.cpp     # Aquisição do ADS1115 (Bateria, LDR, pH, TDS), DS18B20 e DHT22
+│
+└── Firmware_esp32/
+    ├── platformio.ini          # Configuração da ESP32 e biblioteca ArduinoJson
+    └── src/
+        └── main.cpp            # Gateway Wi-Fi/HTTPS ThingsBoard, cliente NTP e Árvore de Decisão ML
+```
 
 ---
 
-## 📡 Protocolo de Comunicação (UART)
+## 📡 Protocolo de Comunicação Bidirecional (`Serial2` @ $9600\text{ baud}$)
 
-A Pico envia os dados para o ESP32 via `Serial1` (Baud rate padrão: `115200`). O payload é uma string formatada, terminada com quebra de linha (`\n`), facilitando o parsing no gateway:
+### 1. Telemetria: BitDogLab $\rightarrow$ ESP32 (A cada $500\text{ ms}$)
 
-**Formato:** `L:<luz>,T:<temp>,B:<bateria>\n`
-**Exemplo:** `L:91,T:25.40,B:12.30\n`
+A BitDogLab envia uma string estruturada em chave-valor finalizada por quebra de linha (`\n`):
 
-* `L`: Porcentagem de luminosidade (0-100%)
-* `T`: Temperatura em Celsius (°C)
-* `B`: Tensão da bateria (V)
+**Formato Completo (13 campos):**
+
+```
+B:<tensao>,L:<luz>,TA:<temp_agua>,TR:<temp_ar>,U:<umid>,P:<ph>,S:<tds>,A:<auto>,E:<bomba>,C:<min>/<ciclo>,T:<HH>:<MM>\n
+```
+
+**Exemplo Real:**
+
+```
+B:12.2,L:84,TA:24.8,TR:27.3,U:65,P:6.35,S:590,A:1,E:1,C:3/15,T:14:35\n
+```
+
+* `B`: Tensão de alimentação/bateria ($\text{V}$)
+* `L`: Luminosidade ambiente ($0\text{--}100\%$)
+* `TA`: Temperatura da solução nutritiva no reservatório ($^\circ\text{C}$)
+* `TR`: Temperatura do ar externo ($^\circ\text{C}$)
+* `U`: Umidade relativa do ar ($\%$)
+* `P`: Potencial hidrogeniônico da solução ($\text{pH}$)
+* `S`: Sólidos Totais Dissolvidos ($\text{TDS}$ em $\text{ppm}$)
+* `A`: Modo de operação (`1` = Automático, `0` = Manual)
+* `E`: Estado físico do relé da bomba (`1` = Ligada, `0` = Em pausa)
+* `C`: Minuto atual / Tamanho total do ciclo ativo (`3/15` de dia ou `12/50` à noite)
+* `T`: Horário atual sincronizado no controlador (`HH:MM`)
+
+### 2. Sincronismo Horário: ESP32 $\rightarrow$ BitDogLab (A cada $60\text{ s}$)
+
+Assim que o ESP32 obtém a hora oficial via servidor NTP (`pool.ntp.org`), ele atualiza o relógio interno da BitDogLab enviando:
+
+```
+T:14:35\n
+```
 
 ---
 
-## 🗺️ Roadmap (Próximos Passos)
-O sistema está em constante evolução. As próximas implementações incluem:
+## 🗺️ Roadmap e Evolução do Projeto
 
-  **Nível de Água:** Adicionar sensor ultrassônico (à prova d'água) para proteção contra funcionamento a seco da bomba.
-  
-  **Qualidade da Água:** Integração de sensores de pH e Condutividade Elétrica (EC) para monitoramento de nutrientes.
-  
-  **Clima Externo:** Adicionar sensor para monitorar umidade e temperatura do ar no estufa.
-  
-  **Gateway IoT:** Desenvolver o firmware do ESP32 para receber os dados via UART e publicar via http (ThingsBoard).
-
----
-
-
+* [x] **Arquitetura Multitarefa:** Migração completa para **FreeRTOS** com sincronização por Mutexes.
+* [x] **Qualidade da Água e Clima:** Integração dos sensores de `pH`, `TDS` (via ADC de $16\text{ bits}$ `ADS1115`), `DS18B20` e `DHT22`.
+* [x] **Interface Local e Alerta Sonoro:** Exibição em tempo real no display OLED (`Wire1`) e aviso de partida no Buzzer (`GP10`).
+* [x] **Estágio de Potência para Bomba Brushless:** Migração de PWM para chaveamento direto `ON/OFF` via módulo relé isolado.
+* [x] **Gateway IoT e Edge AI:** Firmware da ESP32 com publicação HTTPS no **ThingsBoard**, sincronismo NTP e **Árvore de Decisão** embarcada para diagnóstico da alface.
+* [ ] **Sensor de Nível do Reservatório:** Integrar sensor ultrassônico à prova d'água ou boia de nível para bloqueio de segurança contra funcionamento a seco.
+* [ ] **Dosagem Automatizada (Peristálticas):** Controle de bombas peristálticas para correção automática de `pH` e condutividade (`TDS`).

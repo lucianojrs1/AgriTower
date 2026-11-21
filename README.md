@@ -65,6 +65,13 @@ O firmware da ESP32 atua como coprocessador de conectividade e inteligência art
   * `2`: **Estragado** (com alerta imediato de inspeção da torre)
 * **Diagnóstico Estatístico Contextual:** Compara cada leitura com a média ($\mu$) e o desvio padrão ($\sigma$) esperados para a idade exata do cultivo (dias $1$ a $48$), gerando recomendações agronômicas automáticas quando $\vert Z\vert > 2$ ou fora dos percentis $P_5\text{--}P_{95}$.
 * **Sincronização Dinâmica com o Dashboard:** Consulta atributos compartilhados no ThingsBoard (`data_plantio`) para recalcular automaticamente a idade da cultura e mantém o RP2040 sincronizado via NTP ($\text{GMT}-3$).
+* **Execução Cooperativa (`loop`):** O firmware da ESP32 (framework Arduino) executa as rotinas em um laço cooperativo, com as seguintes periodicidades:
+
+  | Rotina | Periodicidade |
+  | :--- | :---: |
+  | Publicação de telemetria via HTTPS no ThingsBoard | $2\text{ s}$ |
+  | Leitura do atributo compartilhado `data_plantio` | $5\text{ s}$ |
+  | Envio da hora NTP para a BitDogLab (`Serial2`) | $60\text{ s}$ |
 
 ---
 
@@ -93,12 +100,12 @@ Abaixo encontra-se o esquemático completo de interligação entre a **BitDogLab
 | **LED Azul (Telemetria)** | `GP12` | Digital Out | Pulsa por $50\text{ ms}$ a cada pacote transmitido para o ESP32. | 
 | **Display OLED SSD1306** | `GP14` / `GP15` | `Wire1` (I2C1) | `SDA1` no `GP14`, `SCL1` no `GP15` a $400\text{ kHz}$ (endereço `0x3C`), isolado do barramento dos sensores. | 
 | **Conversor ADC ADS1115** | `GP0` / `GP1` | `Wire` (I2C0) | ADC de $16\text{ bits}$ para leitura imune a ruído de `A0` (Tensão $12\text{ V}$), `A1` (`LDR`), `A2` (`pH`) e `A3` (`TDS`). | 
-| **Temp. Água (DS18B20)** | Digital | 1-Wire | Sonda impermeável com resistor *pull-up* de $4.7\text{ k}\Omega$ ($2.2\text{ k}\Omega$ para cabos longos) ao $3.3\text{ V}$. | 
-| **Clima (DHT22)** | Digital | 1-Wire Prop. | Sensor de temperatura ($^\circ\text{C}$) e umidade relativa do ar ($\%$). | 
+| **Temp. Água (DS18B20)** | `GP18` | 1-Wire | Sonda impermeável com resistor *pull-up* de $4.7\text{ k}\Omega$ ($2.2\text{ k}\Omega$ para cabos longos) ao $3.3\text{ V}$. | 
+| **Clima (DHT22)** | `GP19` | 1-Wire Prop. | Sensor de temperatura ($^\circ\text{C}$) e umidade relativa do ar ($\%$). | 
 
 ### 🔋 Alimentação e Cabeamento Externo
 
-* **Fonte Primária:** Fonte Chaveada Colmeia ajustada em $12.2\text{ V}$ para a linha de potência da bomba submersível.
+* **Fonte Primária:** Fonte Chaveada Colmeia de $12\text{ V}$ / $5\text{ A}$ ajustada em $12.2\text{ V}$ para a linha de potência da bomba submersível.
 * **Regulação Lógica:** Conversor Step-Down DC-DC entregando alimentação estabilizada para a placa e módulos sensores.
 * **Cabeamento para Ambiente Externo:** Uso de **Cabo Manga Blindado** (ou CAT5e F/UTP de dupla capa com proteção UV) para os sinais dos sensores (com malha aterrada exclusivamente no `GND` da PCB) e **Cabo Paralelo** $2 \times 1.5\text{ mm}^2$ separado fisicamente para a alimentação da bomba $12\text{ V}$.
 
@@ -106,25 +113,35 @@ Abaixo encontra-se o esquemático completo de interligação entre a **BitDogLab
 
 ## 📂 Estrutura do Projeto
 
-O repositório está organizado no padrão do **PlatformIO**, separando os módulos de domínio da BitDogLab, o firmware do gateway ESP32 e a documentação visual na pasta `docs/`:
+O repositório está organizado no padrão do **PlatformIO**, separando os módulos de domínio da BitDogLab (cabeçalhos em `include/` e implementações em `src/`), o firmware do gateway ESP32, o `dataset` e a documentação visual na pasta `docs/`:
 
 ```
 AgriTower/
+├── .vscode/                    # Configurações do editor (VS Code)
+├── dataset/                    # Dataset do projeto
 ├── docs/
-│   ├── diagrama_fluxo.png      # Fluxograma das Tasks RTOS e pipeline IoT/ML
-│   └── diagrama_eletronico.png # Esquemático elétrico completo da placa e sensores
+│   ├── Fluxo.png               # Fluxograma das Tasks RTOS e pipeline IoT/ML
+│   └── Esquematico.png         # Esquemático elétrico completo da placa e sensores
 │
 ├── Firmware_bitdoglab/
 │   ├── platformio.ini          # Configuração do RP2040 (Core Earle Philhower + FreeRTOS)
+│   ├── include/                # Cabeçalhos (.h) dos módulos
+│   │   ├── agendamento.h
+│   │   ├── bomba.h
+│   │   ├── botao.h
+│   │   ├── comunicacao.h
+│   │   ├── oled.h
+│   │   ├── relogio.h
+│   │   └── sensores.h
 │   └── src/
 │       ├── main.cpp            # Inicialização de periféricos e criação das Tasks do FreeRTOS
-│       ├── agendamento.h/.cpp  # Lógica de ciclos Diurno (5m/10m) e Noturno (5m/45m)
-│       ├── bomba.h/.cpp        # Máquina de estados do Relé (GP4), LED Verde (GP11) e Buzzer (GP10)
-│       ├── botao.h/.cpp        # Leitura com debounce dos botões de Modo (Auto/Manual) e Override
-│       ├── comunicacao.h/.cpp  # Transmissão Serial2 para o ESP32 e painel de debug USB
-│       ├── oled.h/.cpp         # Interface gráfica local no display SSD1306 via Wire1 (GP14/GP15)
-│       ├── relogio.h/.cpp      # Recepção de hora NTP via Serial2 e fallback interno de 60s
-│       └── sensores.h/.cpp     # Aquisição do ADS1115 (Bateria, LDR, pH, TDS), DS18B20 e DHT22
+│       ├── agendamento.cpp     # Lógica de ciclos Diurno (5m/10m) e Noturno (5m/45m)
+│       ├── bomba.cpp           # Máquina de estados do Relé (GP4), LED Verde (GP11) e Buzzer (GP10)
+│       ├── botao.cpp           # Leitura com debounce dos botões de Modo (Auto/Manual) e Override
+│       ├── comunicacao.cpp     # Transmissão Serial2 para o ESP32 e painel de debug USB
+│       ├── oled.cpp            # Interface gráfica local no display SSD1306 via Wire1 (GP14/GP15)
+│       ├── relogio.cpp         # Recepção de hora NTP via Serial2 e fallback interno de 60s
+│       └── sensores.cpp        # Aquisição do ADS1115 (Bateria, LDR, pH, TDS), DS18B20 (GP18) e DHT22 (GP19)
 │
 └── Firmware_esp32/
     ├── platformio.ini          # Configuração da ESP32 e biblioteca ArduinoJson
@@ -140,7 +157,7 @@ AgriTower/
 
 A BitDogLab envia uma string estruturada em chave-valor finalizada por quebra de linha (`\n`):
 
-**Formato Completo (13 campos):**
+**Formato Completo (11 campos):**
 
 ```
 B:<tensao>,L:<luz>,TA:<temp_agua>,TR:<temp_ar>,U:<umid>,P:<ph>,S:<tds>,A:<auto>,E:<bomba>,C:<min>/<ciclo>,T:<HH>:<MM>\n

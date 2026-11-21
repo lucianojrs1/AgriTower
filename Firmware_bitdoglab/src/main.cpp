@@ -23,7 +23,7 @@ void setup() {
     initRelogio();     // Inicializa Serial2 (GP8/GP9) e Mutex do relógio
     initBotao();       // Inicializa Botão A (GP5), LED Vermelho (GP13) e Mutex
     initAgendamento(); // Inicializa o Mutex do agendador de ciclos
-    initBomba();       // Inicializa PWM Bomba (GP4), LED Verde (GP11) e Mutex
+    initBomba();       // Inicializa a Bomba (GP4), LED Verde (GP11) e Mutex
     initSensores();    // Inicializa I2C0, ADS1115, DS18B20, DHT22 e Mutex
     initComunicacao();
     initOled(); // Inicializa LED Azul de telemetria (GP12)

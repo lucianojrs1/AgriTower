@@ -20,7 +20,7 @@ static const float fatorDivisorPH = 2.0f;
 static Adafruit_ADS1115 ads;
 static OneWire oneWire(pinTempAgua);
 static DallasTemperature sensorTempAgua(&oneWire);
-static DHT dht(pinDHT, DHT22);
+static DHT dht(pinDHT, DHT11);
 
 static bool adsConectado = false;
 

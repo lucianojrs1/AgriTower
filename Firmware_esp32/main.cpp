@@ -41,10 +41,10 @@ const unsigned long intervaloRetentativaHora = 5000;  // Retenta a cada 5 s enqu
 bool          horaEnviada              = false;
 
 unsigned long ultimaSincronizacaoAtributos = 0;
-const unsigned long intervaloAtributos     = 5000;    // Consulta data_plantio a cada 5 s
+const unsigned long intervaloAtributos     = 300000;    // Consulta data_plantio a cada 5 s
 
 unsigned long ultimoPostTelemetria     = 0;
-const unsigned long intervaloPostTb    = 2000;        // Envia POST HTTP ao ThingsBoard a cada 2 s
+const unsigned long intervaloPostTb    = 60000;        // Envia POST HTTP ao ThingsBoard a cada 2 s
 
 // =========================================================================
 // 2. MODELO DE ÁRVORE DE DECISÃO E REFERÊNCIA DO DATASET (ALFACE)
@@ -528,7 +528,6 @@ void processarTelemetriaDaPico() {
   pacote["nivel_bateria"]      = tensao_bat_lida;
   pacote["ph"]                 = ph_lido;
   pacote["ec"]                 = tds_lido;
-  pacote["nivel_reservatorio"] = 100;
 
   // Estado do Relé da Bomba e Progresso do Ciclo
   if (temEstadoECiclo) {
@@ -537,17 +536,11 @@ void processarTelemetriaDaPico() {
     snprintf(ciclo_str, sizeof(ciclo_str), "%d/%d", min_ciclo_lido, tam_ciclo_lido);
 
     pacote["bomba_ativa"]   = bombaLigada;
-    pacote["estado_bomba"]  = bombaLigada ? "Ligada" : "Desligada";
-    pacote["forca_bomba"]   = bombaLigada ? 100 : 0; // Relé ON = 100%, OFF = 0%
     pacote["ciclo_bomba"]   = ciclo_str;
-    pacote["minuto_ciclo"]  = min_ciclo_lido;
-    pacote["tamanho_ciclo"] = tam_ciclo_lido;
   }
 
   // Modo de Operação e Horário da BitDogLab
   pacote["modo_automatico"] = (modo_auto_lido == 1);
-  pacote["modo_operacao"]   = (modo_auto_lido == 1) ? "Automático" : "Manual";
-  pacote["hora_pico"]       = hora_str;
 
   // Resultados do Modelo de Predição (Árvore de Decisão)
   if (diag.valido) {

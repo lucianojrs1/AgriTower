@@ -35,7 +35,7 @@ A arquitetura é dividida em dois subsistemas cooperativos:
 O diagrama abaixo ilustra o fluxo de execução concorrente das *Tasks* do FreeRTOS na BitDogLab, a troca de pacotes via `Serial2` e o pipeline de inferência da Árvore de Decisão e publicação HTTPS na ESP32:
 
 <div align="center">
-  <img src="docs/Fluxo.png" alt="Diagrama de Fluxo do Sistema AgriTower" width="850">
+  <img src="docs/Fluxo2.png" alt="Diagrama de Fluxo do Sistema AgriTower" width="850">
   <p><em>Figura 1: Diagrama de fluxo de software, escalonamento de Tasks RTOS e comunicação IoT.</em></p>
 </div>
 
